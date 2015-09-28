@@ -1,0 +1,21 @@
+{
+  "name": "angular-hypermedia-offline",
+  "description": "Offline functionality for angular-hypermedia",
+  "version": "0.1.0",
+  "homepage": "https://github.com/jcassee/angular-hypermedia-offline",
+  "license": "MIT",
+  "main": "dist/hypermedia-offline.js",
+  "ignore": [
+    ".editorconfig",
+    ".gitignore",
+    ".travis.yml"
+  ],
+  "dependencies": {
+    "angular-hypermedia": "^0.1",
+    "angular-netstatus": "^1.1",
+    "dexie": "^1.1"
+  },
+  "devDependencies": {
+    "angular-mocks": "^1.3"
+  }
+}
