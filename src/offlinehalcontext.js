@@ -11,6 +11,15 @@
 angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
 
   /**
+   * @ngdoc object
+   * @name Dexie
+   * @description
+   *
+   * Then global Dexie object. Injected to allow mocking in tests.
+   */
+  .value('Dexie', Dexie)
+
+  /**
    * @ngdoc type
    * @name OfflineContext
    * @description
@@ -19,8 +28,8 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
    *
    * @see ResourceContext
    */
-  .factory('OfflineContext', ['$http', '$log', '$q', '$rootScope', 'ResourceContext', 'Netstatus',
-      function ($http, $log, $q, $rootScope, ResourceContext, Netstatus) {
+  .factory('OfflineContext', ['$http', '$log', '$q', '$rootScope', 'Dexie', 'ResourceContext', 'Netstatus',
+      function ($http, $log, $q, $rootScope, Dexie, ResourceContext, Netstatus) {
 
     var db = new Dexie('offlinecache');
 
@@ -106,11 +115,13 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
               db.requests.add(resource.$putRequest());
               db.resources.put({data: resource, links: resource.$links}, resource.$uri);
             }).then(function () {
-              $rootScope.$apply(function () { offlineRequests += 1; });
               resolve(resource);
             }).catch(function (error) {
               reject(error);
             });
+          }).then(function (resource) {
+            offlineRequests += 1;
+            return resource;
           });
         } else {
           return ResourceContext.prototype.httpPut.call(this, resource);
@@ -131,11 +142,13 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
               db.requests.add(resource.$deleteRequest());
               db.resources.delete(resource.$uri);
             }).then(function () {
-              $rootScope.$apply(function () { offlineRequests += 1; });
               resolve(resource);
             }).catch(function (error) {
               reject(error);
             });
+          }).then(function (resource) {
+            offlineRequests += 1;
+            return resource;
           });
         } else {
           return ResourceContext.prototype.httpDelete.call(this, resource);
@@ -156,11 +169,13 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
         if (Netstatus.offline) {
           return $q(function (resolve, reject) {
             return db.requests.add(resource.$postRequest(data, headers, callback)).then(function () {
-              $rootScope.$apply(function () { offlineRequests += 1; });
               resolve(resource);
             }).catch(function (error) {
               reject(error);
             });
+          }).then(function (resource) {
+            offlineRequests += 1;
+            return resource;
           });
         } else {
           return ResourceContext.prototype.httpPost.call(this, resource, data, headers, callback);
@@ -239,7 +254,21 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
        *
        * @property {ReplayOfflineRequests}
        */
-      replayRequests: {value: defaultReplayRequests, writable: true}
+      replayRequests: {value: defaultReplayRequests, writable: true},
+
+      /**
+       * Reinitialize the offline cache by deleting the database and reopening it.
+       */
+      reinitialize: {value: function () {
+        return $q(function (resolve, reject) {
+          return db.delete().then(function() {
+            db.open();
+            resolve();
+          }).catch(function (error) {
+            reject(error);
+          });
+        });
+      }}
     });
 
     function getAndClearOfflineRequests() {

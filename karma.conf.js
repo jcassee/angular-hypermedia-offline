@@ -3,7 +3,12 @@ module.exports = function (config) {
 
     files: [
       'bower_components/angular/angular.js',
+      'bower_components/angular-hypermedia/dist/hypermedia.js',
       'bower_components/angular-mocks/angular-mocks.js',
+      'bower_components/angular-netstatus/src/netstatus.js',
+      'bower_components/dexie/dist/latest/Dexie.js',
+      'bower_components/linkheader-parser/dist/linkheader-parser-browser.js',
+      'bower_components/mediatype-parser/dist/mediatype-parser-browser.js',
       'bower_components/uri-templates/uri-templates.js',
       'src/**/*.js'
     ],
