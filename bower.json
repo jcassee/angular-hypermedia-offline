@@ -1,7 +1,7 @@
 {
   "name": "angular-hypermedia-offline",
   "description": "Offline functionality for angular-hypermedia",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "homepage": "https://github.com/jcassee/angular-hypermedia-offline",
   "license": "MIT",
   "main": "dist/hypermedia-offline.js",
