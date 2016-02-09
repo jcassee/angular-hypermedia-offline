@@ -3,11 +3,14 @@
   "browser": true,
   "jasmine": true,
   "browserify": true,
+  "sub": true,
   "globals": {
+    "Dexie": false,
+    "UriTemplate": false,
     "angular": false,
     "module": false,
     "inject": false,
-    "Dexie": false,
-    "UriTemplate": false
+    "linkHeaderParser": false,
+    "mediaTypeParser": false
   }
 }

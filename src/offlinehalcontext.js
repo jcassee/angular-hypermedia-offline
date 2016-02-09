@@ -17,7 +17,9 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
    *
    * Then global Dexie object. Injected to allow mocking in tests.
    */
-  .value('Dexie', Dexie)
+  .factory('Dexie', function () {
+    return Dexie;
+  })
 
   /**
    * @ngdoc type
@@ -34,8 +36,8 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
     var db = new Dexie('offlinecache');
 
     db.version(1).stores({
-      resources: "",
-      requests: "++,[url+method]"
+      resources: '',
+      requests: '++,[url+method]'
     });
 
     db.on('error', function (msg) {
@@ -83,7 +85,7 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
        */
       httpGet: {value: function (resource) {
         var self = this;
-        if (Netstatus.offline) {
+        if (Netstatus.offline || OfflineContext.isOfflineOnly(resource)) {
           return $q(function (resolve, reject) {
             return db.resources.get(resource.$uri).then(function (item) {
               if (item) {
@@ -109,10 +111,11 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
        * @returns a promise that is resolved to the resource
        */
       httpPut: {value: function (resource) {
-        if (Netstatus.offline) {
+        var self = this;
+        if (Netstatus.offline || OfflineContext.isOfflineOnly(resource)) {
           return $q(function (resolve, reject) {
             return db.transaction('rw', db.resources, db.requests, function () {
-              db.requests.add(resource.$putRequest());
+              if (!OfflineContext.isOfflineOnly(resource)) db.requests.add(resource.$putRequest());
               db.resources.put({data: resource, links: resource.$links}, resource.$uri);
             }).then(function () {
               resolve(resource);
@@ -136,16 +139,20 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
        * @returns a promise that is resolved to the resource
        */
       httpDelete: {value: function (resource) {
-        if (Netstatus.offline) {
+        var self = this;
+        if (Netstatus.offline || OfflineContext.isOfflineOnly(resource)) {
           return $q(function (resolve, reject) {
             return db.transaction('rw', db.resources, db.requests, function () {
-              db.requests.add(resource.$deleteRequest());
+              if (!OfflineContext.isOfflineOnly(resource)) db.requests.add(resource.$deleteRequest());
               db.resources.delete(resource.$uri);
             }).then(function () {
               resolve(resource);
             }).catch(function (error) {
               reject(error);
             });
+          }).then(function () {
+            delete self.resources[resource.$uri];
+            return self.markSynced(resource, null);
           }).then(function (resource) {
             offlineRequests += 1;
             return resource;
@@ -166,7 +173,8 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
        * @returns a promise that is resolved to the resource
        */
       httpPost: {value: function (resource, data, headers, callback) {
-        if (Netstatus.offline) {
+        var self = this;
+        if (Netstatus.offline || OfflineContext.isOfflineOnly(resource)) {
           return $q(function (resolve, reject) {
             return db.requests.add(resource.$postRequest(data, headers, callback)).then(function () {
               resolve(resource);
@@ -213,7 +221,7 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
     });
 
     // Class properties
-    Object.defineProperties(OfflineContext, {
+    defineProperties(OfflineContext, {
 
       /**
        * The number of current HTTP requests.
@@ -233,16 +241,40 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
         return offlineRequests;
       }},
 
+      isOfflineOnly: {value: function (resource) {
+        return !(startsWith(resource.$uri, 'http://') || startsWith(resource.$uri, 'https://'));
+      }},
+
       /**
        * The stored offline POST requests for a resource.
        *
-       * @property {object[]}
+       * @function
+       * @param {Resource} resource
+       * @return {object[]}
        */
       getOfflinePosts: {value: function (resource) {
         return $q(function (resolve, reject) {
           return db.requests.where('[url+method]').equals([resource.$uri, 'post']).toArray().then(function (requests) {
             resolve(requests);
           }).catch(function (error) {
+            reject(error);
+          });
+        });
+      }},
+
+      getAndClearOfflineResources: {value: function () {
+        return $q(function (resolve, reject) {
+          var context = new OfflineContext();
+          return db.transaction('rw', db.resources, function () {
+            db.resources.each(function (item, cursor) {
+              if (!(startsWith(cursor.key, 'http://') || startsWith(cursor.key, 'https://'))) {
+                context.get(cursor.key).$update(item.data, item.links);
+                cursor.delete();
+              }
+            });
+          }).then(function () {
+            resolve(context);
+          }, function (error) {
             reject(error);
           });
         });
@@ -258,10 +290,12 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
 
       /**
        * Reinitialize the offline cache by deleting the database and reopening it.
+       *
+       * @function
        */
       reinitialize: {value: function () {
         return $q(function (resolve, reject) {
-          return db.delete().then(function() {
+          return db.delete().then(function () {
             db.open();
             resolve();
           }).catch(function (error) {
@@ -279,7 +313,9 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
             requests = array;
             return db.requests.clear();
           }).then(function () {
-            $rootScope.$apply(function () { offlineRequests = 0; });
+            $rootScope.$apply(function () {
+              offlineRequests = 0;
+            });
             resolve(requests);
           }).catch(function (error) {
             reject(error);
@@ -319,6 +355,19 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
     });
 
     return OfflineContext;
+
+    // Polyfill because IE does not support String.startsWith
+    function startsWith(string, searchString, position) {
+      position = position || 0;
+      return string.indexOf(searchString, position) === position;
+    }
+
+    function defineProperties(object, properties) {
+      angular.forEach(properties, function (descriptor, name) {
+        descriptor = angular.extend({}, descriptor, {configurable: true});
+        Object.defineProperty(object, name, descriptor);
+      });
+    }
   }])
 
   /**
