@@ -53,6 +53,7 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
 
 
     var offlineRequests = null;
+    var onlineHandlers = [];
 
     db.on("ready", function () {
       return db.requests.count(function (count) {
@@ -246,6 +247,29 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
       }},
 
       /**
+       * Register a handler to call when coming online.
+       *
+       * @function
+       * @param {function} handler callback function
+       */
+      registerOnlineHandler: {value: function (handler) {
+        onlineHandlers.push(handler);
+      }},
+
+      /**
+       * Unregister a handler to call when coming online.
+       *
+       * @function
+       * @param {function} handler callback function
+       */
+      unregisterOnlineHandler: {value: function (handler) {
+        var index = onlineHandlers.indexOf(handler);
+        if (index > -1) {
+          onlineHandlers.splice(index, 1);
+        }
+      }},
+
+      /**
        * The stored offline POST requests for a resource.
        *
        * @function
@@ -351,7 +375,13 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
     // Automatically replay requests after coming online
     $rootScope.$on('netstatus', function (event, status) {
       if (status !== 'online') return;
-      return getAndClearOfflineRequests().then(OfflineContext.replayRequests);
+
+      var chain = $q.when();
+      onlineHandlers.forEach(function (handler) {
+        chain = chain.then(handler);
+      });
+
+      return chain.then(getAndClearOfflineRequests).then(OfflineContext.replayRequests);
     });
 
     return OfflineContext;
