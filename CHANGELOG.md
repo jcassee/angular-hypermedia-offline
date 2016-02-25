@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+
+- Add offline-only resources.
+
 ## 0.4.0
 
 - Support handlers that are called when coming online.

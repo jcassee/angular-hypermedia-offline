@@ -30,8 +30,8 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
    *
    * @see ResourceContext
    */
-  .factory('OfflineContext', ['$http', '$log', '$q', '$rootScope', 'Dexie', 'ResourceContext', 'Netstatus',
-      function ($http, $log, $q, $rootScope, Dexie, ResourceContext, Netstatus) {
+  .factory('OfflineContext', ['$http', '$log', '$q', '$rootScope', '$window', 'Dexie', 'ResourceContext', 'Netstatus',
+      function ($http, $log, $q, $rootScope, $window, Dexie, ResourceContext, Netstatus) {
 
     var db = new Dexie('offlinecache');
 
@@ -53,13 +53,26 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
 
 
     var offlineRequests = null;
+    var hasOfflineChanges = false;
     var onlineHandlers = [];
 
     db.on("ready", function () {
-      return db.requests.count(function (count) {
+      db.requests.count(function (count) {
         $rootScope.$apply(function () {
           offlineRequests = count;
+          hasOfflineChanges = !!count;
         });
+      });
+      db.resources.keys(function (uris) {
+        function markOfflineChange() {
+          hasOfflineChanges = true;
+        }
+        for (var uri in uris) {
+          if (!(startsWith(uri, 'http://') || startsWith(uri, 'https://'))) {
+            $rootScope.$apply(markOfflineChange);
+            break;
+          }
+        }
       });
     });
 
@@ -76,6 +89,19 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
 
     OfflineContext.prototype = Object.create(ResourceContext.prototype, {
       constructor: {value: OfflineContext},
+
+      /**
+       * Create a new offline-only resource. The URI will not be a URL, so it will only
+       * be persisted in the offline cache.
+       *
+       * @function
+       * @param {ResourceFactory} [Factory] optional resource creation function
+       * @returns {Resource}
+       */
+      createOffline: {value: function (Factory) {
+        var uri = 'urn:uuid:' + $window.uuid.v4();
+        return this.get(uri, Factory);
+      }},
 
       /**
        * Perform a HTTP GET request on a resource.
@@ -113,10 +139,11 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
        */
       httpPut: {value: function (resource) {
         var self = this;
-        if (Netstatus.offline || OfflineContext.isOfflineOnly(resource)) {
+        var offlineOnly = OfflineContext.isOfflineOnly(resource);
+        if (Netstatus.offline || offlineOnly) {
           return $q(function (resolve, reject) {
             return db.transaction('rw', db.resources, db.requests, function () {
-              if (!OfflineContext.isOfflineOnly(resource)) db.requests.add(resource.$putRequest());
+              if (!offlineOnly) db.requests.add(resource.$putRequest());
               db.resources.put({data: resource, links: resource.$links}, resource.$uri);
             }).then(function () {
               resolve(resource);
@@ -124,7 +151,8 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
               reject(error);
             });
           }).then(function (resource) {
-            offlineRequests += 1;
+            if (!offlineOnly) offlineRequests += 1;
+            hasOfflineChanges = true;
             return resource;
           });
         } else {
@@ -141,10 +169,11 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
        */
       httpDelete: {value: function (resource) {
         var self = this;
-        if (Netstatus.offline || OfflineContext.isOfflineOnly(resource)) {
+        var offlineOnly = OfflineContext.isOfflineOnly(resource);
+        if (Netstatus.offline || offlineOnly) {
           return $q(function (resolve, reject) {
             return db.transaction('rw', db.resources, db.requests, function () {
-              if (!OfflineContext.isOfflineOnly(resource)) db.requests.add(resource.$deleteRequest());
+              if (!offlineOnly) db.requests.add(resource.$deleteRequest());
               db.resources.delete(resource.$uri);
             }).then(function () {
               resolve(resource);
@@ -155,7 +184,8 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
             delete self.resources[resource.$uri];
             return self.markSynced(resource, null);
           }).then(function (resource) {
-            offlineRequests += 1;
+            if (!offlineOnly) offlineRequests += 1;
+            hasOfflineChanges = true;
             return resource;
           });
         } else {
@@ -184,6 +214,7 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
             });
           }).then(function (resource) {
             offlineRequests += 1;
+            hasOfflineChanges = true;
             return resource;
           });
         } else {
@@ -242,6 +273,10 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
         return offlineRequests;
       }},
 
+      hasOfflineChanges: {get: function () {
+        return hasOfflineChanges;
+      }},
+
       isOfflineOnly: {value: function (resource) {
         return !(startsWith(resource.$uri, 'http://') || startsWith(resource.$uri, 'https://'));
       }},
@@ -286,14 +321,13 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
         });
       }},
 
-      getAndClearOfflineResources: {value: function () {
+      getOfflineResources: {value: function () {
         return $q(function (resolve, reject) {
           var context = new OfflineContext();
-          return db.transaction('rw', db.resources, function () {
+          return db.transaction('r', db.resources, function () {
             db.resources.each(function (item, cursor) {
               if (!(startsWith(cursor.key, 'http://') || startsWith(cursor.key, 'https://'))) {
                 context.get(cursor.key).$update(item.data, item.links);
-                cursor.delete();
               }
             });
           }).then(function () {
@@ -339,11 +373,28 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
           }).then(function () {
             $rootScope.$apply(function () {
               offlineRequests = 0;
+              hasOfflineChanges = false;
             });
             resolve(requests);
           }).catch(function (error) {
             reject(error);
           });
+        });
+      });
+    }
+
+    function clearOfflineResources() {
+      return $q(function (resolve, reject) {
+        return db.transaction('rw', db.resources, function () {
+          db.resources.each(function (item, cursor) {
+            if (!(startsWith(cursor.key, 'http://') || startsWith(cursor.key, 'https://'))) {
+              cursor.delete();
+            }
+          });
+        }).then(function () {
+          resolve();
+        }, function (error) {
+          reject(error);
         });
       });
     }
@@ -381,7 +432,10 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
         chain = chain.then(handler);
       });
 
-      return chain.then(getAndClearOfflineRequests).then(OfflineContext.replayRequests);
+      return chain
+        .then(clearOfflineResources)
+        .then(getAndClearOfflineRequests)
+        .then(OfflineContext.replayRequests);
     });
 
     return OfflineContext;

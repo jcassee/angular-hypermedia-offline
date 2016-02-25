@@ -12,7 +12,8 @@
   "dependencies": {
     "angular-hypermedia": "^0.1",
     "angular-netstatus": "^1.1",
-    "dexie": "^1.1"
+    "dexie": "^1.1",
+    "node-uuid": "^1.4"
   },
   "devDependencies": {
     "angular-mocks": "^1.3"
