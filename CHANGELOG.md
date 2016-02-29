@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0
+
+- Broadcast replays of offline requests.
+
 ## 0.5.0
 
 - Add offline-only resources.

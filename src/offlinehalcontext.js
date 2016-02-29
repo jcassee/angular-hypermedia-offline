@@ -413,7 +413,11 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
       var promise = $q.when();
       requests.forEach(function (request) {
         promise = promise.then(function () {
-          return $http(request);
+          return $http(request).then(function (response) {
+            return broadcastReplay(request, response, true);
+          }, function (response) {
+            return broadcastReplay(request, response, false);
+          });
         });
       });
       promise = promise.catch(function (response) {
@@ -421,6 +425,11 @@ angular.module('hypermedia-offline', ['hypermedia', 'netstatus'])
         return $q.reject(response);
       });
       return promise;
+    }
+
+    function broadcastReplay(request, response, resolved) {
+      $rootScope.$broadcast('offlineRequestReplayed', request, response, resolved);
+      return resolved ? response : $q.reject(response);
     }
 
     // Automatically replay requests after coming online
